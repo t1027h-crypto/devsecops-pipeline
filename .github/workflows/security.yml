@@ -1,0 +1,49 @@
+name: security
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secrets (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sca:
+    name: SCA (OSV-Scanner)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get Juice Shop source
+        run: git clone --depth 1 https://github.com/juice-shop/juice-shop.git
+      - name: Create lockfile
+        working-directory: juice-shop
+        run: npm install --package-lock-only --package-lock=true --ignore-scripts
+      - name: Scan with OSV-Scanner
+        continue-on-error: true
+        run: docker run --rm -v "$PWD/juice-shop:/src" ghcr.io/google/osv-scanner scan source -r --no-ignore /src
+
+  dast:
+    name: DAST (ZAP Baseline)
+    runs-on: ubuntu-latest
+    services:
+      juice:
+        image: bkimminich/juice-shop
+        ports:
+          - 3000:3000
+    steps:
+      - name: Wait for Juice Shop
+        run: curl --retry 30 --retry-delay 5 --retry-connrefused -sSf http://localhost:3000 > /dev/null
+      - uses: zaproxy/action-baseline@v0.15.0
+        with:
+          target: http://localhost:3000
+          allow_issue_writing: false
